@@ -24,7 +24,7 @@ import mysql.connector
 #conn.commit()
 #conn.close()
 
-####### PRUEBA
+
 print('Base de datos creada')
 
 
