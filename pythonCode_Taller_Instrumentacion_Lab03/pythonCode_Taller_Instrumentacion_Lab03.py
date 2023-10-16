@@ -1,162 +1,166 @@
-﻿import mysql.connector
+﻿import serial
 import tkinter as tk
 from tkinter import ttk
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+#import sqlite3
+import mysql.connector
 import datetime
 
+# Configura la comunicación con Arduino (ajusta el puerto serie según tu configuración)
+arduino_port = 'COM5'  # Cambia a tu puerto serie
+baud_rate = 9600
+ser = serial.Serial(arduino_port, baud_rate)
 
-# Variables globales para almacenar los valores de tiempo, data1 y data2
-tiempo_actual = []
-data1_actual = []
-data2_actual = []
+# Función para enviar el número seleccionado al Arduino
+def enviar_numero():
+    valor = var.get()
+    if valor <= 7:
+        comando = str(valor)
+    else:
+        comando = chr(96 + valor - 7)  # Convierte el número a la letra correspondiente
+    ser.write(comando.encode() + b'\n')
+    # respuesta = ser.readline().strip()
+    # respuesta_label.config(text=f"Respuesta del dispositivo: {respuesta.decode()}")
 
+# Función para actualizar los datos desde Arduino
+def update_data():
+    data = ser.readline().decode().strip().split(',')
+    if len(data) == 2:
+        try:
+            data = [int(val) for val in data]
+            data_buffer.append(data)
+            if len(data_buffer) > 50:
+                data_buffer.pop(0)
+            plot_data()
+        except ValueError:
+            pass
+    root.after(100, update_data)  # Actualiza cada 100 ms
 
-## ======================================================================================================================================================================================
+# Función para encender/apagar el canal 1
+def toggle_channel1():
+    global plot_channel1
+    plot_channel1 = not plot_channel1
+    plot_data()
 
-def agregar_base_de_datos():
+# Función para encender/apagar el canal 2
+def toggle_channel2():
+    global plot_channel2
+    plot_channel2 = not plot_channel2
+    plot_data()
+
+# Función para trazar los datos en el gráfico
+def plot_data():
+    ax.clear()
+    if plot_channel1:
+        ax.plot(range(len(data_buffer)), [d[0] for d in data_buffer], label='Canal 1')
+    if plot_channel2:
+        ax.plot(range(len(data_buffer)), [d[1] for d in data_buffer], label='Canal 2')
+    ax.legend()
+    canvas.draw()
+
+# Función para agregar datos a la base de datos SQLite
+def agregar_a_base_de_datos():
+    
+    cursor = conn.cursor()
+
     # Crear una tabla
     cursor.execute('''CREATE TABLE IF NOT EXISTS datos (Nombre_Usuario VARCHAR(255), Fecha DATE, Canal INT, Unidades_Fisicas VARCHAR(255), Vector_Datos DOUBLE)''')
     
-    # Obtener el valor del nombre de usuario desde la variable
-    nombre_del_usuario = nombre_usuario.get()
-    print(f"Nombre del usuario: {nombre_del_usuario}")
-
+    nombre_usuario = nombre_usuario_entry.get()  # Obtener el nombre del usuario
+    print(f"Nombre del usuario: {nombre_usuario}")
+    
     # Extraer la fecha 
     fecha_actual = datetime.date.today()
-    
-    # Obtener datos    
-    for data in data1_actual:
 
-        print(data)
-        
+    for data in data_buffer:
         # Insertar datos
-        cursor.execute("INSERT INTO datos (Nombre_Usuario, Fecha, Canal, Unidades_Fisicas, Vector_Datos) VALUES (%s, %s, %s, %s, %s)", (nombre_del_usuario, fecha_actual, 1, 'Voltios(V)', data))
+        cursor.execute("INSERT INTO datos (Nombre_Usuario, Fecha, Canal, Unidades_Fisicas, Vector_Datos) VALUES (%s, %s, %s, %s, %s)", (nombre_usuario, fecha_actual, 1, 'Voltios(V)', data[0]))
         print("Datos del canal 1 agregados")
         
-    for data in data2_actual:
-
-        print(data)
-        
-        # Insertar datos
-        cursor.execute("INSERT INTO datos (Nombre_Usuario, Fecha, Canal, Unidades_Fisicas, Vector_Datos) VALUES (%s, %s, %s, %s, %s)", (nombre_del_usuario, fecha_actual, 2, 'Voltios(V)', data))
+        cursor.execute("INSERT INTO datos (Nombre_Usuario, Fecha, Canal, Unidades_Fisicas, Vector_Datos) VALUES (%s, %s, %s, %s, %s)", (nombre_usuario, fecha_actual, 2, 'Voltios(V)', data[1]))
         print("Datos del canal 2 agregados")
-
+        
     # Guardar cambios
     conn.commit()
-
-## ======================================================================================================================================================================================
-
-
-# Función para generar datos en tiempo real para las dos entradas (simulación de voltaje)
-def generar_datos():
-    min_voltage = 0.0  # Valor mínimo de voltaje
-    max_voltage = 5.0  # Valor máximo de voltaje (ajusta según tus necesidades)
-    tiempo = np.linspace(0, 25, 100)  # Rango de tiempo de 0 a 25 segundos
-    data1 = np.random.uniform(min_voltage, max_voltage, 100)  # Datos para la entrada 1
-    data2 = np.random.uniform(min_voltage, max_voltage, 100)  # Datos para la entrada 2
-    return tiempo, data1, data2
-
-# Función para actualizar la gráfica
-def actualizar_grafica():
+    #conn.close()
+    print("Datos agregados")
     
-    global tiempo_actual, data1_actual, data2_actual
-    #tiempo_actual.clear() 
-    #data1_actual.clear()
-    #data2_actual.clear()
-    
-    tiempo, data1, data2 = generar_datos()
-    tiempo_actual = tiempo
-    data1_actual = data1
-    data2_actual = data2  
 
-    ax.clear()
-    ax.plot(tiempo, data1, label='Entrada 1')
-    ax.plot(tiempo, data2, label='Entrada 2')
-    ax.set_xlabel('Tiempo (s)')  # Etiqueta del eje X actualizada a "Tiempo (s)"
-    ax.set_ylabel('Voltaje (V)')  # Etiqueta del eje Y actualizada a "Voltaje (V)"
-    ax.set_title(f'Datos de Voltaje en Tiempo Real de dos Entradas para {nombre_usuario.get()}')
-    ax.set_xlim(0, 25)  # Establecer límites del eje X
-    ax.legend()
-    canvas.draw()
-    root.after(1000, actualizar_grafica)  # Actualiza cada segundo (ajusta según tus necesidades)
-
-# Función para manejar el cambio de estado de los radiobuttons
-def cambiar_estado(canal, valor):
-    if canal == 1:
-        print(f'Canal 1: {valor}')
-    elif canal == 2:
-        print(f'Canal 2: {valor}')
-    
-# Crear la ventana principal
+# Configura la ventana principal
 root = tk.Tk()
-root.title("Interfaz de Datos en Tiempo Real para dos Entradas en el mismo Gráfico")
+root.title('Control y Visualización en Tiempo Real de Arduino')
+root.geometry('1000x700')
 
-# Crear una figura de Matplotlib
-fig = Figure(figsize=(8, 6), dpi=100)
-ax = fig.add_subplot(1, 1, 1)
+# Configura el gráfico y lo coloca a la izquierda en la parte superior
+fig = Figure(figsize=(6, 4), dpi=100)
+ax = fig.add_subplot(111)
+data_buffer = []
 
-# Crear un lienzo para mostrar la gráfica en la ventana
 canvas = FigureCanvasTkAgg(fig, master=root)
-canvas_widget = canvas.get_tk_widget()
-canvas_widget.grid(row=0, column=0, rowspan=12, columnspan=12)  # Ubicar el gráfico en la esquina superior izquierda
+canvas.get_tk_widget().grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky='nsew')
 
-# Crear un cuadro de entrada de texto para el nombre del usuario
-nombre_usuario = tk.StringVar()  # Variable para almacenar el nombre del usuario
-nombre_usuario_entry = ttk.Entry(root, textvariable=nombre_usuario)
-nombre_usuario_label = ttk.Label(root, text="Nombre del Usuario:")
-nombre_usuario_label.grid(row=13, column=9, padx=10, pady=5, sticky="w")
-nombre_usuario_entry.grid(row=13, column=10, padx=10, pady=5, sticky="w")
+# Variable para almacenar el valor seleccionado
+var = tk.IntVar()
 
-# Crear Radiobuttons adicionales antes de los Radiobuttons principales para Canal 1
-opciones_previas_canal1 = ["IN 1", "IN 2"]
-var_previas_canal1 = tk.StringVar()
-var_previas_canal1.set(opciones_previas_canal1[0])  # Establecer la opción predeterminada
-for i, opcion in enumerate(opciones_previas_canal1):
-    radio_button = ttk.Radiobutton(root, text=opcion, variable=var_previas_canal1, value=opcion, command=lambda i=i: cambiar_estado(1, opciones_previas_canal1[i]))
-    radio_button.grid(row=i + 1, column=12, padx=(10, 10), sticky="w")  # Usar padx para establecer el espacio a la izquierda
+# Cuadro de entrada de texto para el nombre de usuario
+nombre_usuario_label = ttk.Label(root, text="Nombre de Usuario:")
+nombre_usuario_label.grid(row=3, column=0, padx=10, pady=10, sticky='w')
+nombre_usuario_entry = ttk.Entry(root)
+nombre_usuario_entry.grid(row=3, column=1, padx=10, pady=10, sticky='w')
 
-# Crear Radiobuttons para Canal 1
-canal1_label = ttk.Label(root, text="Canal 1")
-canal1_label.grid(row=0, column=12, padx=(40, 10), columnspan=2)  # Usar padx para establecer el espacio entre las columnas
-canal1_radio_buttons = []
-opciones_canal1 = ["Atenuación 1", "Atenuación 2", "Seguidor", "Ganancia 1", "Ganancia 2", "Ganancia 3"]
-var_canal1 = tk.StringVar()
-var_canal1.set(opciones_canal1[0])  # Establecer la opción predeterminada
-for i, opcion in enumerate(opciones_canal1):
-    radio_button = ttk.Radiobutton(root, text=opcion, variable=var_canal1, value=opcion, command=lambda i=i: cambiar_estado(1, opciones_canal1[i]))
-    radio_button.grid(row=i + 1, column=13, padx=(40, 10), sticky="w")  # Usar padx para establecer el espacio a la izquierda
-    canal1_radio_buttons.append(radio_button)
+# Crear radio botones para el canal 1 a la derecha del gráfico
+canal1_frame = ttk.LabelFrame(root, text="Control de Canal 1")
+canal1_frame.grid(row=0, column=2, padx=10, pady=10, rowspan=2, sticky='nsew')
 
-# Crear Radiobuttons adicionales antes de los Radiobuttons principales para Canal 2
-opciones_previas_canal2 = ["IN 1", "IN 2"]
-var_previas_canal2 = tk.StringVar()
-var_previas_canal2.set(opciones_previas_canal2[0])  # Establecer la opción predeterminada
-for i, opcion in enumerate(opciones_previas_canal2):
-    radio_button = ttk.Radiobutton(root, text=opcion, variable=var_previas_canal2, value=opcion, command=lambda i=i: cambiar_estado(2, opciones_previas_canal2[i]))
-    radio_button.grid(row=i + 1, column=16, padx=(40, 10), sticky="w")  # Usar padx para establecer el espacio a la izquierda
-    
-# Crear Radiobuttons para Canal 2
-canal2_label = ttk.Label(root, text="Canal 2")
-canal2_label.grid(row=0, column=15, padx=(40, 5), columnspan=2)  # Usar padx para establecer el espacio entre las columnas
-canal2_radio_buttons = []
-opciones_canal2 = ["Atenuación 1", "Atenuación 2", "Seguidor", "Ganancia 1", "Ganancia 2", "Ganancia 3"]
-var_canal2 = tk.StringVar()
-var_canal2.set(opciones_canal2[0])  # Establecer la opción predeterminada
-for i, opcion in enumerate(opciones_canal2):
-    radio_button = ttk.Radiobutton(root, text=opcion, variable=var_canal2, value=opcion, command=lambda i=i: cambiar_estado(2, opciones_canal2[i]))
-    radio_button.grid(row=i + 1, column=17, padx=(40, 5), sticky="w")  # Usar padx para establecer el espacio a la izquierda
-    canal2_radio_buttons.append(radio_button)
-    
+radio_button1 = tk.Radiobutton(canal1_frame, text="Atenuación 1", variable=var, value=1)
+radio_button2 = tk.Radiobutton(canal1_frame, text="Atenuación 2", variable=var, value=2)
+radio_button3 = tk.Radiobutton(canal1_frame, text="Atenuación 3", variable=var, value=3)
+radio_button4 = tk.Radiobutton(canal1_frame, text="Seguidor", variable=var, value=4)
+radio_button5 = tk.Radiobutton(canal1_frame, text="Ganancia 1", variable=var, value=5)
+radio_button6 = tk.Radiobutton(canal1_frame, text="Ganancia 2", variable=var, value=6)
+radio_button7 = tk.Radiobutton(canal1_frame, text="Ganancia 3", variable=var, value=7)
+
+radio_button1.pack()
+radio_button2.pack()
+radio_button3.pack()
+radio_button4.pack()
+radio_button5.pack()
+radio_button6.pack()
+radio_button7.pack()
+
+# Crear radio botones para el canal 2 a la derecha de los del canal 1
+canal2_frame = ttk.LabelFrame(root, text="Control de Canal 2")
+canal2_frame.grid(row=0, column=3, padx=10, pady=10, rowspan=2, sticky='nsew')
+
+radio_button_a = tk.Radiobutton(canal2_frame, text="Atenuación 1", variable=var, value=8)
+radio_button_b = tk.Radiobutton(canal2_frame, text="Atenuación 2", variable=var, value=9)
+radio_button_c = tk.Radiobutton(canal2_frame, text="Atenuación 3", variable=var, value=10)
+radio_button_d = tk.Radiobutton(canal2_frame, text="Seguidor", variable=var, value=11)
+radio_button_e = tk.Radiobutton(canal2_frame, text="Ganancia 1", variable=var, value=12)
+radio_button_f = tk.Radiobutton(canal2_frame, text="Ganancia 2", variable=var, value=13)
+radio_button_g = tk.Radiobutton(canal2_frame, text="Ganancia 3", variable=var, value=14)
+
+radio_button_a.pack()
+radio_button_b.pack()
+radio_button_c.pack()
+radio_button_d.pack()
+radio_button_e.pack()
+radio_button_f.pack()
+radio_button_g.pack()
 
 
-#####################
-###               ###
-###     Main      ###
-###               ###
-#####################
+# Configura los botones de encendido/apagado debajo del gráfico
+channel1_button = tk.Button(root, text="Canal 1", command=toggle_channel1)
+channel1_button.grid(row=2, column=0, padx=10, pady=10)
+
+channel2_button = tk.Button(root, text="Canal 2", command=toggle_channel2)
+channel2_button.grid(row=2, column=1, padx=10, pady=10)
+
+# Botón para enviar el valor seleccionado al Arduino al lado abajo de los radio botones
+enviar_button = tk.Button(root, text="Enviar", command=enviar_numero)
+enviar_button.grid(row=3, column=2, columnspan=2, padx=10, pady=10, sticky='nsew')
 
 # Establecer la conexión
 conn = mysql.connector.connect(
@@ -165,27 +169,35 @@ conn = mysql.connector.connect(
     password="ti1234",
     database="ti_g2"
 )
-cursor = conn.cursor()
+#cursor = conn.cursor()
 
-# Título del botón "Agregar"
-titulo_base_de_datos = ttk.Label(root, text="Base de Datos")
-titulo_base_de_datos.grid(row=13, column=6, pady=5)
+# Botón para agregar datos a la base de datos al lado abajo del botón de enviar
+boton_agregar_a_base_de_datos = tk.Button(root, text="Agregar a la Base de Datos", command=agregar_a_base_de_datos)
+boton_agregar_a_base_de_datos.grid(row=4, column=0, padx=10, pady=10, sticky='nsew')
 
-# Botón para agregar la base de datos
-agregar_btn = ttk.Button(root, text="Agregar datos", style="Agregar.TButton", command=agregar_base_de_datos)
-agregar_btn.grid(row=13, column=7, pady=10, padx=1, sticky="w")  # Alineado a la izquierda y espacio en el lado izquierdo
+# Etiqueta para mostrar la respuesta del dispositivo al lado abajo del botón de agregar a la base de datos
+#respuesta_label = tk.Label(root, text="Respuesta del dispositivo:")
+#respuesta_label.grid(row=5, column=0, columnspan=4, padx=10, pady=10)
 
-# Crear un estilo personalizado para los botones
-style = ttk.Style()
-style.configure("Inicio.TButton", foreground="black", background="red")
-style.configure("Agregar.TButton", foreground="black", background="green")
+# Configura el sistema de cuadrícula para expandir correctamente los elementos
+for i in range(6):
+    root.grid_rowconfigure(i, weight=1)
+    root.grid_columnconfigure(i, weight=1)
 
-# Botón para iniciar la visualización de datos en tiempo real
-iniciar_btn = ttk.Button(root, text="Inicio", style="Inicio.TButton", command=actualizar_grafica)
-iniciar_btn.grid(row=13, column=0, columnspan=6, pady=10, padx=10)  # Alineado a la izquierda y espacio en el lado izquierdo
+# Inicializa las variables de estado de los canales
+plot_channel1 = True
+plot_channel2 = True
 
-# Ejecutar la aplicación
-root.after(1000, actualizar_grafica)  # Comienza la actualización de la gráfica
+# Inicia la actualización de datos
+update_data()
+
+# Cierra el puerto serie al cerrar la ventana
+def close_serial_port():
+    ser.close()
+    root.destroy()
+
+root.protocol('WM_DELETE_WINDOW', close_serial_port)
+
 root.mainloop()
 
 # Cerrar la conexión con la base de datos
